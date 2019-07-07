@@ -115,10 +115,12 @@ function jac(nlp :: ADNLPModel, x :: AbstractVector)
   return ForwardDiff.jacobian(nlp.c, x)
 end
 
-function jac_structure(nlp :: ADNLPModel)
+function jac_structure!(nlp :: ADNLPModel, rows :: AbstractVector{<: Integer}, cols :: AbstractVector{<: Integer})
   m, n = nlp.meta.ncon, nlp.meta.nvar
   I = ((i,j) for i = 1:m, j = 1:n)
-  return (getindex.(I, 1)[:], getindex.(I, 2)[:])
+  rows[1: nlp.meta.nnzj] .= getindex.(I, 1)[:]
+  cols[1: nlp.meta.nnzj] .= getindex.(I, 2)[:]
+  return rows, cols
 end
 
 function jac_coord!(nlp :: ADNLPModel, x :: AbstractVector, rows :: AbstractVector{<: Integer}, cols :: AbstractVector{<: Integer}, vals :: AbstractVector)
@@ -158,7 +160,7 @@ end
 
 function hess(nlp :: ADNLPModel, x :: AbstractVector; obj_weight :: Real = one(eltype(x)), y :: AbstractVector = eltype(x)[])
   increment!(nlp, :neval_hess)
-  Hx = obj_weight == 0.0 ? spzeros(nlp.meta.nvar, nlp.meta.nvar) :
+  Hx = obj_weight == 0.0 ? zeros(nlp.meta.nvar, nlp.meta.nvar) :
        ForwardDiff.hessian(nlp.f, x) * obj_weight
   for i = 1:min(length(y), nlp.meta.ncon)
     if y[i] != 0.0
@@ -171,8 +173,8 @@ end
 function hess_structure!(nlp :: ADNLPModel, rows :: AbstractVector{<: Integer}, cols :: AbstractVector{<: Integer})
   n = nlp.meta.nvar
   I = ((i,j) for i = 1:n, j = 1:n if i ≥ j)
-  rows .= getindex.(I, 1)
-  cols .= getindex.(I, 2)
+  rows[1 : nlp.meta.nnzh] .= getindex.(I, 1)
+  cols[1 : nlp.meta.nnzh] .= getindex.(I, 2)
   return rows, cols
 end
 
@@ -183,19 +185,6 @@ function hess_coord!(nlp :: ADNLPModel, x :: AbstractVector, rows :: AbstractVec
     vals[k] = Hx[i,j]
   end
   return rows, cols, vals
-end
-
-function hess_coord(nlp :: ADNLPModel, x :: AbstractVector; obj_weight :: Real = one(eltype(x)), y :: AbstractVector = eltype(x)[])
-  Hx = hess(nlp, x, obj_weight=obj_weight, y=y)
-  n = nlp.meta.nvar
-  I = ((i,j,Hx[i,j]) for i = 1:n, j = 1:n if i ≥ j)
-  return (getindex.(I, 1), getindex.(I, 2), getindex.(I, 3))
-end
-
-function hprod(nlp :: ADNLPModel, x :: AbstractVector, v :: AbstractVector;
-               obj_weight :: Real = one(eltype(x)), y :: AbstractVector = eltype(x)[])
-  Hv = zeros(nlp.meta.nvar)
-  return hprod!(nlp, x, v, Hv, obj_weight=obj_weight, y=y)
 end
 
 function hprod!(nlp :: ADNLPModel, x :: AbstractVector, v :: AbstractVector, Hv :: AbstractVector;

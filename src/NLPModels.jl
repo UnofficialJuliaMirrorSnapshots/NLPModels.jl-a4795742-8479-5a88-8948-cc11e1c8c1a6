@@ -17,7 +17,7 @@ export AbstractNLPModelMeta, NLPModelMeta, AbstractNLPModel, Counters
 export reset!, sum_counters,
        obj, grad, grad!, objgrad, objgrad!, objcons, objcons!,
        cons, cons!, jth_con, jth_congrad, jth_congrad!, jth_sparse_congrad,
-       jac_structure, jac_coord!, jac_coord,
+       jac_structure!, jac_structure, jac_coord!, jac_coord,
        jac, jprod, jprod!, jtprod, jtprod!, jac_op, jac_op!,
        jth_hprod, jth_hprod!, ghjvprod, ghjvprod!,
        hess_structure!, hess_structure, hess_coord!, hess_coord, hess, hprod, hprod!, hess_op, hess_op!,
@@ -133,10 +133,15 @@ cons!(::AbstractNLPModel, ::AbstractVector, ::AbstractVector) =
 
 jth_con(::AbstractNLPModel, ::AbstractVector, ::Integer) =
   throw(NotImplementedError("jth_con"))
-jth_congrad(::AbstractNLPModel, ::AbstractVector, ::Integer) =
-  throw(NotImplementedError("jth_congrad"))
+
+function jth_congrad(nlp::AbstractNLPModel, x::AbstractVector, j::Integer)
+  g = Vector{eltype(x)}(undef, nlp.meta.nvar)
+  return jth_congrad!(nlp, x, j, g)
+end
+
 jth_congrad!(::AbstractNLPModel, ::AbstractVector, ::Integer, ::AbstractVector) =
   throw(NotImplementedError("jth_congrad!"))
+
 jth_sparse_congrad(::AbstractNLPModel, ::AbstractVector, ::Integer) =
   throw(NotImplementedError("jth_sparse_congrad"))
 
@@ -183,28 +188,44 @@ end
 
 """`(rows,cols) = jac_structure(nlp)`
 
-Returns the structure of the constraint's Jacobian in sparse coordinate format.
+Return the structure of the constraint's Jacobian in sparse coordinate format.
 """
-jac_structure(:: AbstractNLPModel) = throw(NotImplementedError("jac_structure"))
+function jac_structure(nlp :: AbstractNLPModel)
+  rows = Vector{Int}(undef, nlp.meta.nnzj)
+  cols = Vector{Int}(undef, nlp.meta.nnzj)
+  jac_structure!(nlp, rows, cols)
+end
+
+"""`jac_structure!(nlp, rows, cols)`
+
+Return the structure of the constraint's Jacobian in sparse coordinate format in place.
+"""
+jac_structure!(:: AbstractNLPModel, :: AbstractVector{<:Integer}, :: AbstractVector{<:Integer}) = throw(NotImplementedError("jac_structure!"))
 
 """`(rows,cols,vals) = jac_coord!(nlp, x, rows, cols, vals)`
 
 Evaluate ``∇c(x)``, the constraint's Jacobian at `x` in sparse coordinate format,
 rewriting `vals`. `rows` and `cols` are not rewritten.
 """
-jac_coord!(:: AbstractNLPModel, :: AbstractVector) = throw(NotImplementedError("jac_coord!"))
+jac_coord!(:: AbstractNLPModel, :: AbstractVector, ::AbstractVector{<: Integer}, ::AbstractVector{<: Integer}, ::AbstractVector) = throw(NotImplementedError("jac_coord!"))
 
 """`(rows,cols,vals) = jac_coord(nlp, x)`
 
 Evaluate ``∇c(x)``, the constraint's Jacobian at `x` in sparse coordinate format.
 """
-jac_coord(:: AbstractNLPModel, :: AbstractVector) = throw(NotImplementedError("jac_coord"))
+function jac_coord(nlp :: AbstractNLPModel, x :: AbstractVector)
+  rows = Vector{Int}(undef, nlp.meta.nnzj)
+  cols = Vector{Int}(undef, nlp.meta.nnzj)
+  vals = Vector{eltype(x)}(undef, nlp.meta.nnzj)
+  jac_structure!(nlp, rows, cols)
+  return jac_coord!(nlp, x, rows, cols, vals)
+end
 
 """`Jx = jac(nlp, x)`
 
 Evaluate ``∇c(x)``, the constraint's Jacobian at `x` as a sparse matrix.
 """
-jac(::AbstractNLPModel, ::AbstractVector) = throw(NotImplementedError("jac"))
+jac(nlp::AbstractNLPModel, x::AbstractVector) = sparse(jac_coord(nlp, x)..., nlp.meta.ncon, nlp.meta.nvar)
 
 """`Jv = jprod(nlp, x, v)`
 
@@ -270,18 +291,25 @@ function jac_op!(nlp :: AbstractNLPModel, x :: AbstractVector,
                                           false, false, prod, ctprod, ctprod)
 end
 
-jth_hprod(::AbstractNLPModel, ::AbstractVector, ::AbstractVector, ::Integer) =
-  throw(NotImplementedError("jth_hprod"))
+function jth_hprod(nlp::AbstractNLPModel, x::AbstractVector, v::AbstractVector, j::Integer)
+  hv = Vector{eltype(x)}(undef, nlp.meta.nvar)
+  return jth_hprod!(nlp, x, v, j, hv)
+end
+
 jth_hprod!(::AbstractNLPModel, ::AbstractVector, ::AbstractVector, ::Integer, ::AbstractVector) =
   throw(NotImplementedError("jth_hprod!"))
-ghjvprod(::AbstractNLPModel, ::AbstractVector, ::AbstractVector, ::AbstractVector) =
-  throw(NotImplementedError("ghjvprod"))
+
+function ghjvprod(nlp::AbstractNLPModel, x::AbstractVector, g::AbstractVector, v::AbstractVector)
+  gHv = Vector{eltype(x)}(undef, nlp.meta.ncon)
+  return ghjvprod!(nlp, x, g, v, gHv)
+end
+
 ghjvprod!(::AbstractNLPModel, ::AbstractVector, ::AbstractVector, ::AbstractVector, ::AbstractVector) =
   throw(NotImplementedError("ghjvprod!"))
 
 """`(rows,cols) = hess_structure(nlp)`
 
-Returns the structure of the Lagrangian Hessian in sparse coordinate format.
+Return the structure of the Lagrangian Hessian in sparse coordinate format.
 """
 function hess_structure(nlp :: AbstractNLPModel)
   rows = Vector{Int}(undef, nlp.meta.nnzh)
@@ -291,7 +319,7 @@ end
 
 """`hess_structure!(nlp, rows, cols)`
 
-Returns the structure of the Lagrangian Hessian in sparse coordinate format in place.
+Return the structure of the Lagrangian Hessian in sparse coordinate format in place.
 """
 hess_structure!(:: AbstractNLPModel, ::AbstractVector{<: Integer}, ::AbstractVector{<: Integer}) = throw(NotImplementedError("hess_structure!"))
 
@@ -302,7 +330,7 @@ with objective function scaled by `obj_weight`, i.e.,
 $(LAGRANGIAN_HESSIAN),rewriting `vals`. `rows` and `cols` are not rewritten.
 Only the lower triangle is returned.
 """
-hess_coord!(:: AbstractNLPModel, :: AbstractVector, ::AbstractVector{<: Integer}, ::AbstractVector{<: Integer}, ::AbstractVector; kwargs...) = throw(NotImplementedError("hess_coord!"))
+hess_coord!(nlp:: AbstractNLPModel, :: AbstractVector, ::AbstractVector{<: Integer}, ::AbstractVector{<: Integer}, ::AbstractVector; obj_weight :: Float64=1.0, y :: AbstractVector=zeros(nlp.meta.ncon)) = throw(NotImplementedError("hess_coord!"))
 
 """`(rows,cols,vals) = hess_coord(nlp, x; obj_weight=1.0, y=zeros)`
 
@@ -312,7 +340,13 @@ with objective function scaled by `obj_weight`, i.e.,
 $(LAGRANGIAN_HESSIAN).
 Only the lower triangle is returned.
 """
-hess_coord(nlp::AbstractNLPModel, x::AbstractVector; y::AbstractVector=Float64[], obj_weight::Real=1.0) = throw(NotImplementedError("hess_coord"))
+function hess_coord(nlp :: AbstractNLPModel, x :: AbstractVector; kwargs...)
+  rows = Vector{Int}(undef, nlp.meta.nnzh)
+  cols = Vector{Int}(undef, nlp.meta.nnzh)
+  vals = Vector{eltype(x)}(undef, nlp.meta.nnzh)
+  hess_structure!(nlp, rows, cols)
+  return hess_coord!(nlp, x, rows, cols, vals; kwargs...)
+end
 
 """`Hx = hess(nlp, x; obj_weight=1.0, y=zeros)`
 
@@ -322,8 +356,7 @@ with objective function scaled by `obj_weight`, i.e.,
 $(LAGRANGIAN_HESSIAN).
 Only the lower triangle is returned.
 """
-hess(::AbstractNLPModel, ::AbstractVector; kwargs...) =
-  throw(NotImplementedError("hess"))
+hess(nlp::AbstractNLPModel, x::AbstractVector; kwargs...) = sparse(hess_coord(nlp, x; kwargs...)..., nlp.meta.nvar, nlp.meta.nvar)
 
 """`Hv = hprod(nlp, x, v; obj_weight=1.0, y=zeros)`
 
@@ -331,9 +364,9 @@ Evaluate the product of the Lagrangian Hessian at `(x,y)` with the vector `v`,
 with objective function scaled by `obj_weight`, where the Lagrangian Hessian is
 $(LAGRANGIAN_HESSIAN).
 """
-function hprod(nlp::AbstractNLPModel, x::AbstractVector, v::AbstractVector; obj_weight::Real = one(eltype(x)), y::AbstractVector=similar(x, 0))
+function hprod(nlp::AbstractNLPModel, x::AbstractVector, v::AbstractVector; kwargs...)
   Hv = similar(x)
-  return hprod!(nlp, x, v, Hv, obj_weight=obj_weight, y=y)
+  return hprod!(nlp, x, v, Hv; kwargs...)
 end
 
 """`Hv = hprod!(nlp, x, v, Hv; obj_weight=1.0, y=zeros)`
@@ -342,7 +375,7 @@ Evaluate the product of the Lagrangian Hessian at `(x,y)` with the vector `v` in
 place, with objective function scaled by `obj_weight`, where the Lagrangian Hessian is
 $(LAGRANGIAN_HESSIAN).
 """
-hprod!(::AbstractNLPModel, ::AbstractVector, ::AbstractVector, ::AbstractVector; kwargs...) =
+hprod!(nlp::AbstractNLPModel, ::AbstractVector, ::AbstractVector, ::AbstractVector; obj_weight :: Float64=1.0, y :: AbstractVector=zeros(nlp.meta.ncon)) =
   throw(NotImplementedError("hprod!"))
 
 """`H = hess_op(nlp, x; obj_weight=1.0, y=zeros)`
@@ -352,9 +385,8 @@ Return the Lagrangian Hessian at `(x,y)` with objective function scaled by
 matrix, e.g., `H * v`. The linear operator H represents
 $(LAGRANGIAN_HESSIAN).
 """
-function hess_op(nlp :: AbstractNLPModel, x :: AbstractVector;
-                 obj_weight :: Float64=1.0, y :: AbstractVector=zeros(nlp.meta.ncon))
-  prod = @closure v -> hprod(nlp, x, v; obj_weight=obj_weight, y=y)
+function hess_op(nlp :: AbstractNLPModel, x :: AbstractVector; kwargs...)
+  prod = @closure v -> hprod(nlp, x, v; kwargs...)
   F = typeof(prod)
   return LinearOperator{Float64,F,F,F}(nlp.meta.nvar, nlp.meta.nvar,
                                        true, true, prod, prod, prod)
@@ -369,9 +401,8 @@ used as preallocated storage for the operation.  The linear operator H
 represents
 $(LAGRANGIAN_HESSIAN).
 """
-function hess_op!(nlp :: AbstractNLPModel, x :: AbstractVector, Hv :: AbstractVector;
-                 obj_weight :: Float64=1.0, y :: AbstractVector=zeros(nlp.meta.ncon))
-  prod = @closure v -> hprod!(nlp, x, v, Hv; obj_weight=obj_weight, y=y)
+function hess_op!(nlp :: AbstractNLPModel, x :: AbstractVector, Hv :: AbstractVector; kwargs...)
+  prod = @closure v -> hprod!(nlp, x, v, Hv; kwargs...)
   F = typeof(prod)
   return LinearOperator{Float64,F,F,F}(nlp.meta.nvar, nlp.meta.nvar,
                                        true, true, prod, prod, prod)
