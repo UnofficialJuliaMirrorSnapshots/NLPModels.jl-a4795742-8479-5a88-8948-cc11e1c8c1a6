@@ -28,6 +28,16 @@ branches:
 
 jobs:
   include:
+    - stage: Breakage
+      julia: 1.2
+      os: linux
+      if: type = pull_request
+      addons:
+        apt_packages:
+          - gfortran
+      script:
+        - julia -e 'using Pkg; pkg"add Git"; pkg"add GitHub"; include("test/test-breakage.jl")'
+      after_success: skip
     - stage: Documentation
       julia: 1.2
       os: linux
