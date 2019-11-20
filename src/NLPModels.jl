@@ -4,6 +4,12 @@ __precompile__()
 module NLPModels
 
 # For documentation purpose
+const OBJECTIVE_HESSIAN = raw"""
+```math
+σ ∇²f(x),
+```
+with `σ = obj_weight`
+"""
 const LAGRANGIAN_HESSIAN = raw"""
 ```math
 ∇²L(x,y) = σ ∇²f(x) + ∑ᵢ yᵢ ∇²cᵢ(x),
@@ -220,24 +226,21 @@ Return the structure of the constraint's Jacobian in sparse coordinate format in
 jac_structure!(:: AbstractNLPModel, :: AbstractVector{<:Integer}, :: AbstractVector{<:Integer}) = throw(NotImplementedError("jac_structure!"))
 
 """
-    (rows,cols,vals) = jac_coord!(nlp, x, rows, cols, vals)
+    vals = jac_coord!(nlp, x, vals)
 
 Evaluate ``∇c(x)``, the constraint's Jacobian at `x` in sparse coordinate format,
-rewriting `vals`. `rows` and `cols` are not rewritten.
+rewriting `vals`.
 """
-jac_coord!(:: AbstractNLPModel, :: AbstractVector, ::AbstractVector{<: Integer}, ::AbstractVector{<: Integer}, ::AbstractVector) = throw(NotImplementedError("jac_coord!"))
+jac_coord!(:: AbstractNLPModel, :: AbstractVector, ::AbstractVector) = throw(NotImplementedError("jac_coord!"))
 
 """
-    (rows,cols,vals) = jac_coord(nlp, x)
+    vals = jac_coord(nlp, x)
 
 Evaluate ``∇c(x)``, the constraint's Jacobian at `x` in sparse coordinate format.
 """
 function jac_coord(nlp :: AbstractNLPModel, x :: AbstractVector)
-  rows = Vector{Int}(undef, nlp.meta.nnzj)
-  cols = Vector{Int}(undef, nlp.meta.nnzj)
   vals = Vector{eltype(x)}(undef, nlp.meta.nnzj)
-  jac_structure!(nlp, rows, cols)
-  return jac_coord!(nlp, x, rows, cols, vals)
+  return jac_coord!(nlp, x, vals)
 end
 
 """
@@ -245,7 +248,11 @@ end
 
 Evaluate ``∇c(x)``, the constraint's Jacobian at `x` as a sparse matrix.
 """
-jac(nlp::AbstractNLPModel, x::AbstractVector) = sparse(jac_coord(nlp, x)..., nlp.meta.ncon, nlp.meta.nvar)
+function jac(nlp::AbstractNLPModel, x::AbstractVector)
+  rows, cols = jac_structure(nlp)
+  vals = jac_coord(nlp, x)
+  sparse(rows, cols, vals, nlp.meta.ncon, nlp.meta.nvar)
+end
 
 """
     Jv = jprod(nlp, x, v)
@@ -293,10 +300,8 @@ The resulting object may be used as if it were a matrix, e.g., `J * v` or
 function jac_op(nlp :: AbstractNLPModel, x :: AbstractVector)
   prod = @closure v -> jprod(nlp, x, v)
   ctprod = @closure v -> jtprod(nlp, x, v)
-  F1 = typeof(prod)
-  F3 = typeof(ctprod)
-  return LinearOperator{Float64,F1,F3,F3}(nlp.meta.ncon, nlp.meta.nvar,
-                                          false, false, prod, ctprod, ctprod)
+  return LinearOperator{Float64}(nlp.meta.ncon, nlp.meta.nvar,
+                                 false, false, prod, ctprod, ctprod)
 end
 
 """
@@ -311,10 +316,8 @@ function jac_op!(nlp :: AbstractNLPModel, x :: AbstractVector,
                  Jv :: AbstractVector, Jtv :: AbstractVector)
   prod = @closure v -> jprod!(nlp, x, v, Jv)
   ctprod = @closure v -> jtprod!(nlp, x, v, Jtv)
-  F1 = typeof(prod)
-  F3 = typeof(ctprod)
-  return LinearOperator{Float64,F1,F3,F3}(nlp.meta.ncon, nlp.meta.nvar,
-                                          false, false, prod, ctprod, ctprod)
+  return LinearOperator{Float64}(nlp.meta.ncon, nlp.meta.nvar,
+                                 false, false, prod, ctprod, ctprod)
 end
 
 function jth_hprod(nlp::AbstractNLPModel, x::AbstractVector, v::AbstractVector, j::Integer)
@@ -352,17 +355,43 @@ Return the structure of the Lagrangian Hessian in sparse coordinate format in pl
 hess_structure!(:: AbstractNLPModel, ::AbstractVector{<: Integer}, ::AbstractVector{<: Integer}) = throw(NotImplementedError("hess_structure!"))
 
 """
-    (rows,cols,vals) = hess_coord!(nlp, x, rows, cols, vals; obj_weight=1.0, y=zeros)
+    vals = hess_coord!(nlp, x, vals; obj_weight=1.0)
+
+Evaluate the objective Hessian at `x` in sparse coordinate format,
+with objective function scaled by `obj_weight`, i.e.,
+$(OBJECTIVE_HESSIAN), rewriting `vals`.
+Only the lower triangle is returned.
+"""
+function hess_coord!(nlp :: AbstractNLPModel, x :: AbstractVector, vals :: AbstractVector; obj_weight :: Float64=1.0)
+  hess_coord!(nlp, x, zeros(nlp.meta.ncon), vals, obj_weight=obj_weight)
+end
+
+"""
+    vals = hess_coord!(nlp, x, y, vals; obj_weight=1.0)
 
 Evaluate the Lagrangian Hessian at `(x,y)` in sparse coordinate format,
 with objective function scaled by `obj_weight`, i.e.,
-$(LAGRANGIAN_HESSIAN),rewriting `vals`. `rows` and `cols` are not rewritten.
+$(LAGRANGIAN_HESSIAN), rewriting `vals`.
 Only the lower triangle is returned.
 """
-hess_coord!(nlp:: AbstractNLPModel, :: AbstractVector, ::AbstractVector{<: Integer}, ::AbstractVector{<: Integer}, ::AbstractVector; obj_weight :: Float64=1.0, y :: AbstractVector=zeros(nlp.meta.ncon)) = throw(NotImplementedError("hess_coord!"))
+hess_coord!(nlp:: AbstractNLPModel, :: AbstractVector, :: AbstractVector, ::AbstractVector; obj_weight :: Float64=1.0) = throw(NotImplementedError("hess_coord!"))
 
 """
-    (rows,cols,vals) = hess_coord(nlp, x; obj_weight=1.0, y=zeros)
+    vals = hess_coord(nlp, x; obj_weight=1.0)
+
+Evaluate the objective Hessian at `x` in sparse coordinate format,
+with objective function scaled by `obj_weight`, i.e.,
+
+$(OBJECTIVE_HESSIAN).
+Only the lower triangle is returned.
+"""
+function hess_coord(nlp :: AbstractNLPModel, x :: AbstractVector; obj_weight::Real=one(eltype(x)))
+  vals = Vector{eltype(x)}(undef, nlp.meta.nnzh)
+  return hess_coord!(nlp, x, vals; obj_weight=obj_weight)
+end
+
+"""
+    vals = hess_coord(nlp, x, y; obj_weight=1.0)
 
 Evaluate the Lagrangian Hessian at `(x,y)` in sparse coordinate format,
 with objective function scaled by `obj_weight`, i.e.,
@@ -370,16 +399,28 @@ with objective function scaled by `obj_weight`, i.e.,
 $(LAGRANGIAN_HESSIAN).
 Only the lower triangle is returned.
 """
-function hess_coord(nlp :: AbstractNLPModel, x :: AbstractVector; kwargs...)
-  rows = Vector{Int}(undef, nlp.meta.nnzh)
-  cols = Vector{Int}(undef, nlp.meta.nnzh)
+function hess_coord(nlp :: AbstractNLPModel, x :: AbstractVector, y :: AbstractVector; obj_weight::Real=one(eltype(x)))
   vals = Vector{eltype(x)}(undef, nlp.meta.nnzh)
-  hess_structure!(nlp, rows, cols)
-  return hess_coord!(nlp, x, rows, cols, vals; kwargs...)
+  return hess_coord!(nlp, x, y, vals; obj_weight=obj_weight)
 end
 
 """
-    Hx = hess(nlp, x; obj_weight=1.0, y=zeros)
+    Hx = hess(nlp, x; obj_weight=1.0)
+
+Evaluate the objective Hessian at `x` as a sparse matrix,
+with objective function scaled by `obj_weight`, i.e.,
+
+$(OBJECTIVE_HESSIAN).
+Only the lower triangle is returned.
+"""
+function hess(nlp::AbstractNLPModel, x::AbstractVector; obj_weight::Real=one(eltype(x)))
+  rows, cols = hess_structure(nlp)
+  vals = hess_coord(nlp, x, obj_weight=obj_weight)
+  sparse(rows, cols, vals, nlp.meta.nvar, nlp.meta.nvar)
+end
+
+"""
+    Hx = hess(nlp, x, y; obj_weight=1.0)
 
 Evaluate the Lagrangian Hessian at `(x,y)` as a sparse matrix,
 with objective function scaled by `obj_weight`, i.e.,
@@ -387,47 +428,103 @@ with objective function scaled by `obj_weight`, i.e.,
 $(LAGRANGIAN_HESSIAN).
 Only the lower triangle is returned.
 """
-hess(nlp::AbstractNLPModel, x::AbstractVector; kwargs...) = sparse(hess_coord(nlp, x; kwargs...)..., nlp.meta.nvar, nlp.meta.nvar)
+function hess(nlp::AbstractNLPModel, x::AbstractVector, y::AbstractVector; obj_weight::Real=one(eltype(x)))
+  rows, cols = hess_structure(nlp)
+  vals = hess_coord(nlp, x, y, obj_weight=obj_weight)
+  sparse(rows, cols, vals, nlp.meta.nvar, nlp.meta.nvar)
+end
 
 """
-    Hv = hprod(nlp, x, v; obj_weight=1.0, y=zeros)
+    Hv = hprod(nlp, x, v; obj_weight=1.0)
+
+Evaluate the product of the objective Hessian at `x` with the vector `v`,
+with objective function scaled by `obj_weight`, where the objective Hessian is
+$(OBJECTIVE_HESSIAN).
+"""
+function hprod(nlp::AbstractNLPModel, x::AbstractVector, v::AbstractVector; obj_weight::Real=one(eltype(x)))
+  Hv = similar(x)
+  return hprod!(nlp, x, v, Hv; obj_weight=obj_weight)
+end
+
+"""
+    Hv = hprod(nlp, x, y, v; obj_weight=1.0)
 
 Evaluate the product of the Lagrangian Hessian at `(x,y)` with the vector `v`,
 with objective function scaled by `obj_weight`, where the Lagrangian Hessian is
 $(LAGRANGIAN_HESSIAN).
 """
-function hprod(nlp::AbstractNLPModel, x::AbstractVector, v::AbstractVector; kwargs...)
+function hprod(nlp::AbstractNLPModel, x::AbstractVector, y::AbstractVector, v::AbstractVector; obj_weight::Real=one(eltype(x)))
   Hv = similar(x)
-  return hprod!(nlp, x, v, Hv; kwargs...)
+  return hprod!(nlp, x, y, v, Hv; obj_weight=obj_weight)
 end
 
 """
-    Hv = hprod!(nlp, x, v, Hv; obj_weight=1.0, y=zeros)
+    Hv = hprod!(nlp, x, v, Hv; obj_weight=1.0)
+
+Evaluate the product of the objective Hessian at `x` with the vector `v` in
+place, with objective function scaled by `obj_weight`, where the objective Hessian is
+$(OBJECTIVE_HESSIAN).
+"""
+function hprod!(nlp::AbstractNLPModel, x::AbstractVector, v::AbstractVector, Hv::AbstractVector; obj_weight :: Float64=1.0)
+  hprod!(nlp, x, zeros(nlp.meta.ncon), v, Hv, obj_weight=obj_weight)
+end
+
+"""
+    Hv = hprod!(nlp, x, y, v, Hv; obj_weight=1.0)
 
 Evaluate the product of the Lagrangian Hessian at `(x,y)` with the vector `v` in
 place, with objective function scaled by `obj_weight`, where the Lagrangian Hessian is
 $(LAGRANGIAN_HESSIAN).
 """
-hprod!(nlp::AbstractNLPModel, ::AbstractVector, ::AbstractVector, ::AbstractVector; obj_weight :: Float64=1.0, y :: AbstractVector=zeros(nlp.meta.ncon)) =
+hprod!(nlp::AbstractNLPModel, ::AbstractVector, ::AbstractVector, ::AbstractVector, ::AbstractVector; obj_weight :: Float64=1.0) =
   throw(NotImplementedError("hprod!"))
 
 """
-    H = hess_op(nlp, x; obj_weight=1.0, y=zeros)
+    H = hess_op(nlp, x; obj_weight=1.0)
+
+Return the objective Hessian at `x` with objective function scaled by
+`obj_weight` as a linear operator. The resulting object may be used as if it were a
+matrix, e.g., `H * v`. The linear operator H represents
+$(OBJECTIVE_HESSIAN).
+"""
+function hess_op(nlp :: AbstractNLPModel, x :: AbstractVector; obj_weight::Real=one(eltype(x)))
+  prod = @closure v -> hprod(nlp, x, v; obj_weight=obj_weight)
+  return LinearOperator{Float64}(nlp.meta.nvar, nlp.meta.nvar,
+                                 true, true, prod, prod, prod)
+end
+
+"""
+    H = hess_op(nlp, x, y; obj_weight=1.0)
 
 Return the Lagrangian Hessian at `(x,y)` with objective function scaled by
 `obj_weight` as a linear operator. The resulting object may be used as if it were a
 matrix, e.g., `H * v`. The linear operator H represents
 $(LAGRANGIAN_HESSIAN).
 """
-function hess_op(nlp :: AbstractNLPModel, x :: AbstractVector; kwargs...)
-  prod = @closure v -> hprod(nlp, x, v; kwargs...)
-  F = typeof(prod)
-  return LinearOperator{Float64,F,F,F}(nlp.meta.nvar, nlp.meta.nvar,
-                                       true, true, prod, prod, prod)
+function hess_op(nlp :: AbstractNLPModel, x :: AbstractVector, y :: AbstractVector; obj_weight::Real=one(eltype(x)))
+  prod = @closure v -> hprod(nlp, x, y, v; obj_weight=obj_weight)
+  return LinearOperator{Float64}(nlp.meta.nvar, nlp.meta.nvar,
+                                 true, true, prod, prod, prod)
 end
 
 """
-    H = hess_op!(nlp, x, Hv; obj_weight=1.0, y=zeros)
+    H = hess_op!(nlp, x, Hv; obj_weight=1.0)
+
+Return the objective Hessian at `x` with objective function scaled by
+`obj_weight` as a linear operator, and storing the result on `Hv`. The resulting
+object may be used as if it were a matrix, e.g., `w = H * v`. The vector `Hv` is
+used as preallocated storage for the operation.  The linear operator H
+represents
+$(OBJECTIVE_HESSIAN).
+"""
+function hess_op!(nlp :: AbstractNLPModel, x :: AbstractVector, Hv :: AbstractVector; obj_weight::Real=one(eltype(x)))
+  prod = @closure v -> hprod!(nlp, x, v, Hv; obj_weight=obj_weight)
+  return LinearOperator{Float64}(nlp.meta.nvar, nlp.meta.nvar,
+                                 true, true, prod, prod, prod)
+end
+
+"""
+    H = hess_op!(nlp, x, y, Hv; obj_weight=1.0)
 
 Return the Lagrangian Hessian at `(x,y)` with objective function scaled by
 `obj_weight` as a linear operator, and storing the result on `Hv`. The resulting
@@ -436,11 +533,10 @@ used as preallocated storage for the operation.  The linear operator H
 represents
 $(LAGRANGIAN_HESSIAN).
 """
-function hess_op!(nlp :: AbstractNLPModel, x :: AbstractVector, Hv :: AbstractVector; kwargs...)
-  prod = @closure v -> hprod!(nlp, x, v, Hv; kwargs...)
-  F = typeof(prod)
-  return LinearOperator{Float64,F,F,F}(nlp.meta.nvar, nlp.meta.nvar,
-                                       true, true, prod, prod, prod)
+function hess_op!(nlp :: AbstractNLPModel, x :: AbstractVector, y :: AbstractVector, Hv :: AbstractVector; obj_weight::Real=one(eltype(x)))
+  prod = @closure v -> hprod!(nlp, x, y, v, Hv; obj_weight=obj_weight)
+  return LinearOperator{Float64}(nlp.meta.nvar, nlp.meta.nvar,
+                                 true, true, prod, prod, prod)
 end
 
 push!(nlp :: AbstractNLPModel, args...; kwargs...) =
